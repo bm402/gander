@@ -11,9 +11,7 @@ import (
 
 var PAGE_SIZE = 100
 
-func GetAllLogUrlsForRepo(owner string, repo string) []string {
-	gh := createGitHubClient()
-
+func GetAllLogUrlsForRepo(gh *github.Client, owner string, repo string, threads int) []string {
 	// get first page of workflow runs
 	workflowRunsFirstPage := getWorkflowRunsByPage(gh, owner, repo, 1)
 	logUrlsFirstPage := getLogUrlsFromWorkflowRuns(workflowRunsFirstPage)
@@ -28,13 +26,26 @@ func GetAllLogUrlsForRepo(owner string, repo string) []string {
 
 	// get remaining pages of workflow runs
 	wg := sync.WaitGroup{}
-	for page := 2; page <= totalPages; page++ {
-		wg.Add(1)
-		go func(page int) {
-			defer wg.Done()
-			logUrlsByPage[page-1] = getLogUrlsByPage(gh, owner, repo, page)
-		}(page)
+	pages := make(chan int, totalPages-1)
+
+	// create worker threads
+	for i := 0; i < threads; i++ {
+		go func(pages <-chan int) {
+			for page := range pages {
+				logUrlsByPage[page-1] = getLogUrlsByPage(gh, owner, repo, page)
+				wg.Done()
+			}
+		}(pages)
 	}
+
+	// add remaining pages to channel to trigger workers
+	for j := 2; j <= totalPages; j++ {
+		wg.Add(1)
+		pages <- j
+	}
+
+	// close channel and wait for threads to finish
+	close(pages)
 	wg.Wait()
 
 	// combine log url page arrays
