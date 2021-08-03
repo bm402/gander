@@ -14,6 +14,6 @@ func GanderRepoOnly(owner, repo string, threads int) {
 	logger.Print(owner, repo, "get-run-ids", "Found", len(runIds), "run ids")
 
 	logger.Print(owner, repo, "download-logs", "Downloading log files")
-	retrieval.DownloadLogsFromRunIds(gh, owner, repo, runIds, threads)
-	logger.Print(owner, repo, "download-logs", "Log files downloded")
+	downloads := retrieval.DownloadLogsFromRunIds(gh, owner, repo, runIds, threads)
+	logger.Print(owner, repo, "download-logs", "Found", downloads, "log files")
 }
