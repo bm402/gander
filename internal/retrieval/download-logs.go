@@ -3,11 +3,11 @@ package retrieval
 import (
 	"context"
 	"io/ioutil"
-	"net/url"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bm402/gander/internal/logger"
@@ -20,10 +20,11 @@ type runIdConfig struct {
 	count int
 }
 
-func DownloadLogsFromRunIds(gh *github.Client, owner, repo string, runIds []int64, threads int) {
+func DownloadLogsFromRunIds(gh *github.Client, owner, repo string, runIds []int64, threads int) int {
 	wg := sync.WaitGroup{}
 	runIdConfigs := make(chan runIdConfig, len(runIds))
 	fivePercent := len(runIds) / 20
+	successfulDownloads := int64(0)
 
 	// create worker threads
 	for i := 0; i < threads; i++ {
@@ -31,9 +32,12 @@ func DownloadLogsFromRunIds(gh *github.Client, owner, repo string, runIds []int6
 			for idConfig := range idConfigs {
 				// status update in 5% increments
 				if len(runIds) >= 20 && idConfig.count > 0 && idConfig.count%fivePercent == 0 {
-					logger.Print(owner, repo, "download-logs", idConfig.count, "files downloaded")
+					logger.Print(owner, repo, "download-logs", idConfig.count, "downloads attempted")
 				}
-				getLogsFromRunId(gh, owner, repo, idConfig.id)
+				err := getLogsFromRunId(gh, owner, repo, idConfig.id)
+				if err == nil {
+					atomic.AddInt64(&successfulDownloads, 1)
+				}
 				wg.Done()
 			}
 		}(runIdConfigs)
@@ -51,9 +55,11 @@ func DownloadLogsFromRunIds(gh *github.Client, owner, repo string, runIds []int6
 	// close channel and wait for threads to finish
 	close(runIdConfigs)
 	wg.Wait()
+
+	return int(successfulDownloads)
 }
 
-func getLogsFromRunId(gh *github.Client, owner, repo string, runId int64) {
+func getLogsFromRunId(gh *github.Client, owner, repo string, runId int64) error {
 	foldername, err := uuid.NewRandom()
 	retries := 0
 	for err != nil {
@@ -65,14 +71,24 @@ func getLogsFromRunId(gh *github.Client, owner, repo string, runId int64) {
 		foldername, err = uuid.NewRandom()
 	}
 
-	url := getLogUrl(gh, owner, repo, runId)
-	downloadLogArchive(owner, repo, url, foldername.String())
-	unzipLogArchive(owner, repo, foldername.String())
+	url, err := getLogUrl(gh, owner, repo, runId)
+	if err != nil {
+		return err
+	}
+	err = downloadLogArchive(owner, repo, url, foldername.String())
+	if err != nil {
+		return err
+	}
+	err = unzipLogArchive(owner, repo, foldername.String())
+	if err != nil {
+		return err
+	}
 	deleteDuplicateLogFiles(owner, repo, foldername.String())
 	addRunIdToFolder(owner, repo, runId, foldername.String())
+	return nil
 }
 
-func getLogUrl(gh *github.Client, owner, repo string, runId int64) string {
+func getLogUrl(gh *github.Client, owner, repo string, runId int64) (string, error) {
 	redirectUrl, resp, err := gh.Actions.GetWorkflowRunLogs(context.TODO(), owner, repo, runId, true)
 	for err != nil {
 		// on rate limit, wait and retry
@@ -83,30 +99,32 @@ func getLogUrl(gh *github.Client, owner, repo string, runId int64) string {
 			redirectUrl, resp, err = gh.Actions.GetWorkflowRunLogs(context.TODO(), owner, repo, runId, true)
 		} else {
 			logger.Print(owner, repo, "download-logs", "Could not get redirect url:", err.Error())
-			redirectUrl, err = &url.URL{}, nil
+			return "", err
 		}
 	}
-	return redirectUrl.String()
+	return redirectUrl.String(), nil
 }
 
-func downloadLogArchive(owner, repo, url, foldername string) {
+func downloadLogArchive(owner, repo, url, foldername string) error {
 	err := exec.Command("wget", "-O", foldername+".zip", url).Run()
 	if err != nil {
 		logger.Print(owner, repo, "download-logs", "Could not download the log archive:", err.Error())
 	}
+	return err
 }
 
-func unzipLogArchive(owner, repo, foldername string) {
+func unzipLogArchive(owner, repo, foldername string) error {
 	err := exec.Command("unzip", "-d", foldername, foldername+".zip").Run()
 	if err != nil {
 		logger.Print(owner, repo, "download-logs", "Could not unzip the log archive:", err.Error())
-		return
+		return err
 	}
 
 	err = exec.Command("rm", foldername+".zip").Run()
 	if err != nil {
 		logger.Print(owner, repo, "download-logs", "Could not delete the unzipped log archive:", err.Error())
 	}
+	return err
 }
 
 func deleteDuplicateLogFiles(owner, repo, foldername string) {
