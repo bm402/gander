@@ -5,12 +5,12 @@ import (
 	"os"
 )
 
-func Print(owner string, repo string, operation string, messages ...interface{}) {
-	fmt.Print("[", owner, "][", repo, "][", operation, "]")
+func Print(owner, repo, operation string, messages ...interface{}) {
+	entry := "[" + owner + "][" + repo + "][" + operation + "]"
 	for _, message := range messages {
-		fmt.Print(" ", message)
+		entry += " " + fmt.Sprint(message)
 	}
-	fmt.Println()
+	fmt.Println(entry)
 }
 
 func Fatal(messages ...interface{}) {

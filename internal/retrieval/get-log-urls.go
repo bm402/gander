@@ -12,18 +12,18 @@ import (
 
 var PAGE_SIZE = 100
 
-func GetAllLogUrlsForRepo(gh *github.Client, owner string, repo string, threads int) []string {
+func GetAllRunIdsForRepo(gh *github.Client, owner, repo string, threads int) []int64 {
 	// get first page of workflow runs
 	workflowRunsFirstPage := getWorkflowRunsByPage(gh, owner, repo, 1)
-	logUrlsFirstPage := getLogUrlsFromWorkflowRuns(workflowRunsFirstPage)
+	runIdsFirstPage := getRunIdsFromWorkflowRuns(workflowRunsFirstPage)
 
 	// calculate totals
 	totalWorkflowRuns := *workflowRunsFirstPage.TotalCount
 	totalPages := int(math.Ceil(float64(totalWorkflowRuns) / float64(PAGE_SIZE)))
 
-	// create page urls array
-	logUrlsByPage := make([][]string, totalPages)
-	logUrlsByPage[0] = logUrlsFirstPage
+	// create page ids array
+	runIdsByPage := make([][]int64, totalPages)
+	runIdsByPage[0] = runIdsFirstPage
 
 	// get remaining pages of workflow runs
 	wg := sync.WaitGroup{}
@@ -33,7 +33,7 @@ func GetAllLogUrlsForRepo(gh *github.Client, owner string, repo string, threads 
 	for i := 0; i < threads; i++ {
 		go func(pages <-chan int) {
 			for page := range pages {
-				logUrlsByPage[page-1] = getLogUrlsByPage(gh, owner, repo, page)
+				runIdsByPage[page-1] = getRunIdsByPage(gh, owner, repo, page)
 				wg.Done()
 			}
 		}(pages)
@@ -49,21 +49,21 @@ func GetAllLogUrlsForRepo(gh *github.Client, owner string, repo string, threads 
 	close(pages)
 	wg.Wait()
 
-	// combine log url page arrays
-	logUrls := []string{}
-	for _, logUrlsForPage := range logUrlsByPage {
-		logUrls = append(logUrls, logUrlsForPage...)
+	// combine run id page arrays
+	runIds := []int64{}
+	for _, runIdsForPage := range runIdsByPage {
+		runIds = append(runIds, runIdsForPage...)
 	}
 
-	return logUrls
+	return runIds
 }
 
-func getLogUrlsByPage(gh *github.Client, owner string, repo string, page int) []string {
+func getRunIdsByPage(gh *github.Client, owner, repo string, page int) []int64 {
 	workflowRuns := getWorkflowRunsByPage(gh, owner, repo, page)
-	return getLogUrlsFromWorkflowRuns(workflowRuns)
+	return getRunIdsFromWorkflowRuns(workflowRuns)
 }
 
-func getWorkflowRunsByPage(gh *github.Client, owner string, repo string, page int) *github.WorkflowRuns {
+func getWorkflowRunsByPage(gh *github.Client, owner, repo string, page int) *github.WorkflowRuns {
 	workflowRuns, resp, err := gh.Actions.ListRepositoryWorkflowRuns(context.TODO(), owner, repo, &github.ListWorkflowRunsOptions{
 		ListOptions: github.ListOptions{
 			Page:    page,
@@ -75,7 +75,7 @@ func getWorkflowRunsByPage(gh *github.Client, owner string, repo string, page in
 		// on rate limit, wait and retry
 		if _, ok := err.(*github.RateLimitError); ok {
 			rateReset := resp.Rate.Reset
-			logger.Print(owner, repo, "get-log-urls", "Rate limit hit, waiting for reset at", rateReset.String())
+			logger.Print(owner, repo, "get-run-ids", "Rate limit hit, waiting for reset at", rateReset.String())
 			time.Sleep(time.Until(rateReset.Time))
 			workflowRuns, resp, err = gh.Actions.ListRepositoryWorkflowRuns(context.TODO(), owner, repo, &github.ListWorkflowRunsOptions{
 				ListOptions: github.ListOptions{
@@ -84,17 +84,18 @@ func getWorkflowRunsByPage(gh *github.Client, owner string, repo string, page in
 				},
 			})
 		} else {
-			logger.Print(owner, repo, "get-log-urls", "Could not retrieve workflow runs: ", err.Error())
+			logger.Print(owner, repo, "get-run-ids", "Could not retrieve page", page, "workflow runs:", err.Error())
+			workflowRuns, err = &github.WorkflowRuns{}, nil
 		}
 	}
 
 	return workflowRuns
 }
 
-func getLogUrlsFromWorkflowRuns(workflowRuns *github.WorkflowRuns) []string {
-	logUrls := []string{}
+func getRunIdsFromWorkflowRuns(workflowRuns *github.WorkflowRuns) []int64 {
+	runIds := []int64{}
 	for _, workflowRun := range workflowRuns.WorkflowRuns {
-		logUrls = append(logUrls, *workflowRun.LogsURL)
+		runIds = append(runIds, *workflowRun.ID)
 	}
-	return logUrls
+	return runIds
 }
