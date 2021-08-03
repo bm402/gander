@@ -2,10 +2,11 @@ package retrieval
 
 import (
 	"context"
-	"log"
 	"math"
 	"sync"
+	"time"
 
+	"github.com/bm402/gander/internal/logger"
 	"github.com/google/go-github/v37/github"
 )
 
@@ -63,15 +64,28 @@ func getLogUrlsByPage(gh *github.Client, owner string, repo string, page int) []
 }
 
 func getWorkflowRunsByPage(gh *github.Client, owner string, repo string, page int) *github.WorkflowRuns {
-	workflowRuns, _, err := gh.Actions.ListRepositoryWorkflowRuns(context.TODO(), owner, repo, &github.ListWorkflowRunsOptions{
+	workflowRuns, resp, err := gh.Actions.ListRepositoryWorkflowRuns(context.TODO(), owner, repo, &github.ListWorkflowRunsOptions{
 		ListOptions: github.ListOptions{
 			Page:    page,
 			PerPage: PAGE_SIZE,
 		},
 	})
 
-	if err != nil {
-		log.Fatal("Could not retrieve workflow runs: ", err.Error())
+	for err != nil {
+		// on rate limit, wait and retry
+		if _, ok := err.(*github.RateLimitError); ok {
+			rateReset := resp.Rate.Reset
+			logger.Print(owner, repo, "get-log-urls", "Rate limit hit, waiting for reset at", rateReset.String())
+			time.Sleep(time.Until(rateReset.Time))
+			workflowRuns, resp, err = gh.Actions.ListRepositoryWorkflowRuns(context.TODO(), owner, repo, &github.ListWorkflowRunsOptions{
+				ListOptions: github.ListOptions{
+					Page:    page,
+					PerPage: PAGE_SIZE,
+				},
+			})
+		} else {
+			logger.Print(owner, repo, "get-log-urls", "Could not retrieve workflow runs: ", err.Error())
+		}
 	}
 
 	return workflowRuns
