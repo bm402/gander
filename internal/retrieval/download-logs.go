@@ -15,28 +15,41 @@ import (
 	"github.com/google/uuid"
 )
 
+type runIdConfig struct {
+	id    int64
+	count int
+}
+
 func DownloadLogsFromRunIds(gh *github.Client, owner, repo string, runIds []int64, threads int) {
 	wg := sync.WaitGroup{}
-	ids := make(chan int64, len(runIds))
+	runIdConfigs := make(chan runIdConfig, len(runIds))
+	fivePercent := len(runIds) / 20
 
 	// create worker threads
 	for i := 0; i < threads; i++ {
-		go func(ids <-chan int64) {
-			for id := range ids {
-				getLogsFromRunId(gh, owner, repo, id)
+		go func(idConfigs <-chan runIdConfig) {
+			for idConfig := range idConfigs {
+				// status update in 5% increments
+				if len(runIds) >= 20 && idConfig.count > 0 && idConfig.count%fivePercent == 0 {
+					logger.Print(owner, repo, "download-logs", idConfig.count, "files downloaded")
+				}
+				getLogsFromRunId(gh, owner, repo, idConfig.id)
 				wg.Done()
 			}
-		}(ids)
+		}(runIdConfigs)
 	}
 
 	// add urls to channel to trigger workers
 	for j := 0; j < len(runIds); j++ {
 		wg.Add(1)
-		ids <- runIds[j]
+		runIdConfigs <- runIdConfig{
+			id:    runIds[j],
+			count: j,
+		}
 	}
 
 	// close channel and wait for threads to finish
-	close(ids)
+	close(runIdConfigs)
 	wg.Wait()
 }
 
