@@ -93,10 +93,10 @@ func getLogUrl(gh *github.Client, owner, repo string, runId int64) (string, erro
 	redirectUrl, resp, err := gh.Actions.GetWorkflowRunLogs(context.TODO(), owner, repo, runId, true)
 	for err != nil {
 		// on rate limit, wait and retry
-		if _, ok := err.(*github.RateLimitError); ok {
-			rateReset := resp.Rate.Reset
+		if resp.StatusCode == 403 && resp.Rate.Remaining == 0 {
+			rateReset := resp.Rate.Reset.Time.Add(time.Minute)
 			logger.Print(owner, repo, "download-logs", "Rate limit hit, waiting for reset at", rateReset.String())
-			time.Sleep(time.Until(rateReset.Time))
+			time.Sleep(time.Until(rateReset))
 			redirectUrl, resp, err = gh.Actions.GetWorkflowRunLogs(context.TODO(), owner, repo, runId, true)
 		} else {
 			logger.Print(owner, repo, "download-logs", "Could not get redirect url:", err.Error())
@@ -145,7 +145,7 @@ func deleteDuplicateLogFiles(owner, repo, foldername string) {
 }
 
 func addRunIdToFolder(owner, repo string, runId int64, foldername string) {
-	contents := []byte(strconv.FormatInt(runId, 10))
+	contents := []byte(strconv.FormatInt(runId, 10) + "\n")
 	err := ioutil.WriteFile(foldername+"/id", contents, 0644)
 	if err != nil {
 		logger.Print(owner, repo, "download-logs", "Could not write run id to folder:", err.Error())
