@@ -8,14 +8,30 @@ import (
 )
 
 func main() {
+	isDownload := flag.Bool("download", false, "Run the log download from GitHub")
+	isSearch := flag.Bool("search", false, "Run the search on existing logs in the current directory")
 	owner := flag.String("o", "", "The owner of the repository")
 	repo := flag.String("r", "", "The name of the repository")
+	wordlistVariables := flag.String("wv", "", "The wordlist of variable names")
+	wordlistDependencies := flag.String("wd", "", "The wordlist of missing dependency messages")
 	threads := flag.Int("t", 10, "Number of threads")
+
 	flag.Parse()
+
+	if !*isDownload && !*isSearch {
+		*isDownload = true
+		*isSearch = true
+	}
 
 	if len(*owner) < 1 || len(*repo) < 1 {
 		logger.Fatal("Owner and/or repo flags not set")
 	}
 
-	workflow.GanderRepoOnly(*owner, *repo, *threads)
+	if *isDownload {
+		workflow.DownloadRepoLogs(*owner, *repo, *threads)
+	}
+
+	if *isSearch {
+		workflow.SearchLogs(*owner, *repo, *wordlistVariables, *wordlistDependencies, *threads)
+	}
 }
