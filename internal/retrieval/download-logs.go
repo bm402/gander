@@ -93,7 +93,7 @@ func getLogUrl(gh *github.Client, owner, repo string, runId int64) (string, erro
 	redirectUrl, resp, err := gh.Actions.GetWorkflowRunLogs(context.TODO(), owner, repo, runId, true)
 	for err != nil {
 		// on rate limit, wait and retry
-		if resp.StatusCode == 403 && resp.Rate.Remaining == 0 {
+		if resp.StatusCode == 403 && resp.Rate.Remaining == 0 && resp.Rate.Reset.Time.After(time.Now()) {
 			rateReset := resp.Rate.Reset.Time.Add(time.Minute)
 			logger.Print(owner, repo, "download-logs", "Rate limit hit, waiting for reset at", rateReset.String())
 			time.Sleep(time.Until(rateReset))
