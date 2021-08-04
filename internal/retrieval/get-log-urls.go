@@ -74,9 +74,9 @@ func getWorkflowRunsByPage(gh *github.Client, owner, repo string, page int) *git
 	for err != nil {
 		// on rate limit, wait and retry
 		if _, ok := err.(*github.RateLimitError); ok {
-			rateReset := resp.Rate.Reset
+			rateReset := resp.Rate.Reset.Time.Add(time.Minute)
 			logger.Print(owner, repo, "get-run-ids", "Rate limit hit, waiting for reset at", rateReset.String())
-			time.Sleep(time.Until(rateReset.Time))
+			time.Sleep(time.Until(rateReset))
 			workflowRuns, resp, err = gh.Actions.ListRepositoryWorkflowRuns(context.TODO(), owner, repo, &github.ListWorkflowRunsOptions{
 				ListOptions: github.ListOptions{
 					Page:    page,
