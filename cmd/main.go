@@ -13,9 +13,8 @@ func main() {
 	owner := flag.String("o", "", "The owner of the repository")
 	repo := flag.String("r", "", "The name of the repository")
 	wordlistVariables := flag.String("wv", "", "The wordlist of variable names")
-	wordlistDependencies := flag.String("wd", "", "The wordlist of missing dependency messages")
+	wordlistKeywords := flag.String("wk", "", "The wordlist of keywords")
 	threads := flag.Int("t", 10, "Number of threads")
-
 	flag.Parse()
 
 	if !*isDownload && !*isSearch {
@@ -32,6 +31,6 @@ func main() {
 	}
 
 	if *isSearch {
-		workflow.SearchLogs(*owner, *repo, *wordlistVariables, *wordlistDependencies, *threads)
+		workflow.SearchLogs(*owner, *repo, *wordlistVariables, *wordlistKeywords, *threads)
 	}
 }

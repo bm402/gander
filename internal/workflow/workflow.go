@@ -19,18 +19,20 @@ func DownloadRepoLogs(owner, repo string, threads int) {
 	logger.Print(owner, repo, "download-logs", "Found", downloads, "log files")
 }
 
-func SearchLogs(owner, repo, wordlistVariables, wordlistDependencies string, threads int) {
+func SearchLogs(owner, repo, wordlistVariables, wordlistKeywords string, threads int) {
 	if len(wordlistVariables) > 0 {
 		logger.Print(owner, repo, "search-logs", "Searching logs for variable assignments")
-		explore.SearchLogsForVariableAssignments(owner, repo, wordlistVariables)
+		matches := explore.SearchLogsForVariableAssignments(owner, repo, wordlistVariables, threads)
+		logger.Print(owner, repo, "search-logs", "A total of", matches, "distinct variable assignments found")
 	} else {
 		logger.Print(owner, repo, "search-logs", "No variable names wordlist provided")
 	}
 
-	if len(wordlistDependencies) > 0 {
-		logger.Print(owner, repo, "search-logs", "Searching logs for missing dependency messages")
-		explore.SearchLogsForMissingDependencies(owner, repo, wordlistDependencies)
+	if len(wordlistKeywords) > 0 {
+		logger.Print(owner, repo, "search-logs", "Searching logs for keywords")
+		matches := explore.SearchLogsForKeywords(owner, repo, wordlistKeywords, threads)
+		logger.Print(owner, repo, "search-logs", "A total of", matches, "distinct keywords found")
 	} else {
-		logger.Print(owner, repo, "search-logs", "No missing dependency messages wordlist provided")
+		logger.Print(owner, repo, "search-logs", "No keywords wordlist provided")
 	}
 }

@@ -1,3 +1,8 @@
 is not in the npm registry
 No matching distribution
 Could not find a valid gem
+ghp_
+gho_
+ghu_
+ghs_
+ghr_
