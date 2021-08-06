@@ -23,7 +23,6 @@ func GetAllRunIdsForRepo(gh *github.Client, owner, repo string, threads int) []i
 	// calculate totals
 	totalWorkflowRuns := *workflowRunsFirstPage.TotalCount
 	totalPages := int(math.Ceil(float64(totalWorkflowRuns) / float64(PAGE_SIZE)))
-	totalPages = 1
 
 	// create page ids array
 	runIdsByPage := make([][]int64, totalPages)
