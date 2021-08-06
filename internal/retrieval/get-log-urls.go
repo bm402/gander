@@ -2,7 +2,9 @@ package retrieval
 
 import (
 	"context"
+	"io/ioutil"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -73,8 +75,13 @@ func getWorkflowRunsByPage(gh *github.Client, owner, repo string, page, thread i
 			PerPage: PAGE_SIZE,
 		},
 	})
+	defer resp.Body.Close()
 
 	for err != nil {
+		respBodyBytes, serr := ioutil.ReadAll(resp.Body)
+		if serr != nil {
+			respBodyBytes = []byte{}
+		}
 		// on rate limit, wait and retry
 		if _, ok := err.(*github.RateLimitError); ok {
 			rateReset := resp.Rate.Reset.Time.Add(time.Minute)
@@ -82,6 +89,20 @@ func getWorkflowRunsByPage(gh *github.Client, owner, repo string, page, thread i
 				logger.Print(owner, repo, "get-run-ids", "Rate limit hit, waiting for reset at", rateReset.String())
 			}
 			time.Sleep(time.Until(rateReset))
+			resp.Body.Close()
+			workflowRuns, resp, err = gh.Actions.ListRepositoryWorkflowRuns(context.TODO(), owner, repo, &github.ListWorkflowRunsOptions{
+				ListOptions: github.ListOptions{
+					Page:    page,
+					PerPage: PAGE_SIZE,
+				},
+			})
+		} else if resp.StatusCode == 403 && strings.Contains(string(respBodyBytes), "secondary rate limit") {
+			rateReset := time.Now().Add(5 * time.Minute)
+			if thread == 0 {
+				logger.Print(owner, repo, "get-run-ids", "Secondary rate limit hit, waiting for reset at", rateReset.String())
+			}
+			time.Sleep(time.Until(rateReset))
+			resp.Body.Close()
 			workflowRuns, resp, err = gh.Actions.ListRepositoryWorkflowRuns(context.TODO(), owner, repo, &github.ListWorkflowRunsOptions{
 				ListOptions: github.ListOptions{
 					Page:    page,

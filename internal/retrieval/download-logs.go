@@ -91,7 +91,13 @@ func getLogsFromRunId(gh *github.Client, owner, repo string, runId int64, thread
 
 func getLogUrl(gh *github.Client, owner, repo string, runId int64, thread int) (string, error) {
 	redirectUrl, resp, err := gh.Actions.GetWorkflowRunLogs(context.TODO(), owner, repo, runId, true)
+	defer resp.Body.Close()
+
 	for err != nil {
+		respBodyBytes, serr := ioutil.ReadAll(resp.Body)
+		if serr != nil {
+			respBodyBytes = []byte{}
+		}
 		// on rate limit, wait and retry
 		if resp.StatusCode == 403 && resp.Rate.Remaining == 0 && resp.Rate.Reset.Time.After(time.Now()) {
 			rateReset := resp.Rate.Reset.Time.Add(time.Minute)
@@ -99,12 +105,22 @@ func getLogUrl(gh *github.Client, owner, repo string, runId int64, thread int) (
 				logger.Print(owner, repo, "download-logs", "Rate limit hit, waiting for reset at", rateReset.String())
 			}
 			time.Sleep(time.Until(rateReset))
+			resp.Body.Close()
+			redirectUrl, resp, err = gh.Actions.GetWorkflowRunLogs(context.TODO(), owner, repo, runId, true)
+		} else if resp.StatusCode == 403 && strings.Contains(string(respBodyBytes), "secondary rate limit") {
+			rateReset := time.Now().Add(5 * time.Minute)
+			if thread == 0 {
+				logger.Print(owner, repo, "download-logs", "Secondary rate limit hit, waiting for reset at", rateReset.String())
+			}
+			time.Sleep(time.Until(rateReset))
+			resp.Body.Close()
 			redirectUrl, resp, err = gh.Actions.GetWorkflowRunLogs(context.TODO(), owner, repo, runId, true)
 		} else {
 			// logger.Print(owner, repo, "download-logs", "Could not get redirect url:", err.Error())
 			return "", err
 		}
 	}
+
 	return redirectUrl.String(), nil
 }
 
