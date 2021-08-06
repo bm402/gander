@@ -14,12 +14,16 @@ var PAGE_SIZE = 100
 
 func GetAllRunIdsForRepo(gh *github.Client, owner, repo string, threads int) []int64 {
 	// get first page of workflow runs
-	workflowRunsFirstPage := getWorkflowRunsByPage(gh, owner, repo, 1)
+	workflowRunsFirstPage := getWorkflowRunsByPage(gh, owner, repo, 1, 0)
+	if *workflowRunsFirstPage.TotalCount == 0 {
+		return []int64{}
+	}
 	runIdsFirstPage := getRunIdsFromWorkflowRuns(workflowRunsFirstPage)
 
 	// calculate totals
 	totalWorkflowRuns := *workflowRunsFirstPage.TotalCount
 	totalPages := int(math.Ceil(float64(totalWorkflowRuns) / float64(PAGE_SIZE)))
+	totalPages = 1
 
 	// create page ids array
 	runIdsByPage := make([][]int64, totalPages)
@@ -31,12 +35,12 @@ func GetAllRunIdsForRepo(gh *github.Client, owner, repo string, threads int) []i
 
 	// create worker threads
 	for i := 0; i < threads; i++ {
-		go func(pages <-chan int) {
+		go func(pages <-chan int, thread int) {
 			for page := range pages {
-				runIdsByPage[page-1] = getRunIdsByPage(gh, owner, repo, page)
+				runIdsByPage[page-1] = getRunIdsByPage(gh, owner, repo, page, thread)
 				wg.Done()
 			}
-		}(pages)
+		}(pages, i)
 	}
 
 	// add remaining pages to channel to trigger workers
@@ -58,12 +62,12 @@ func GetAllRunIdsForRepo(gh *github.Client, owner, repo string, threads int) []i
 	return runIds
 }
 
-func getRunIdsByPage(gh *github.Client, owner, repo string, page int) []int64 {
-	workflowRuns := getWorkflowRunsByPage(gh, owner, repo, page)
+func getRunIdsByPage(gh *github.Client, owner, repo string, page, thread int) []int64 {
+	workflowRuns := getWorkflowRunsByPage(gh, owner, repo, page, thread)
 	return getRunIdsFromWorkflowRuns(workflowRuns)
 }
 
-func getWorkflowRunsByPage(gh *github.Client, owner, repo string, page int) *github.WorkflowRuns {
+func getWorkflowRunsByPage(gh *github.Client, owner, repo string, page, thread int) *github.WorkflowRuns {
 	workflowRuns, resp, err := gh.Actions.ListRepositoryWorkflowRuns(context.TODO(), owner, repo, &github.ListWorkflowRunsOptions{
 		ListOptions: github.ListOptions{
 			Page:    page,
@@ -75,7 +79,9 @@ func getWorkflowRunsByPage(gh *github.Client, owner, repo string, page int) *git
 		// on rate limit, wait and retry
 		if _, ok := err.(*github.RateLimitError); ok {
 			rateReset := resp.Rate.Reset.Time.Add(time.Minute)
-			logger.Print(owner, repo, "get-run-ids", "Rate limit hit, waiting for reset at", rateReset.String())
+			if thread == 0 {
+				logger.Print(owner, repo, "get-run-ids", "Rate limit hit, waiting for reset at", rateReset.String())
+			}
 			time.Sleep(time.Until(rateReset))
 			workflowRuns, resp, err = gh.Actions.ListRepositoryWorkflowRuns(context.TODO(), owner, repo, &github.ListWorkflowRunsOptions{
 				ListOptions: github.ListOptions{

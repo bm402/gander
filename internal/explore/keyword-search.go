@@ -119,7 +119,7 @@ func getWordsFromWordlist(wordlistPath string) []string {
 
 func collectSearchResults(owner, repo, stringToMatch string) map[string]collectedResult {
 	collectedResults := make(map[string]collectedResult)
-	grepResults := searchCurrentDirectoryUsingGrep(owner, repo, stringToMatch)
+	grepResults := searchRepoDirectoryUsingGrep(owner, repo, stringToMatch)
 
 	for _, result := range grepResults {
 		if _, ok := collectedResults[result.matchedString]; ok {
@@ -138,9 +138,9 @@ func collectSearchResults(owner, repo, stringToMatch string) map[string]collecte
 	return collectedResults
 }
 
-func searchCurrentDirectoryUsingGrep(owner, repo, stringToMatch string) []grepResult {
+func searchRepoDirectoryUsingGrep(owner, repo, stringToMatch string) []grepResult {
 	grepResults := []grepResult{}
-	grepOutput, err := exec.Command("grep", "-nri", stringToMatch, ".").Output()
+	grepOutput, err := exec.Command("grep", "-nri", stringToMatch, owner+"/"+repo).Output()
 	if err != nil && err.Error() != "exit status 1" {
 		logger.Print(owner, repo, "search-grep", "Could not search for", stringToMatch, "using grep:", err.Error())
 	}
@@ -148,6 +148,7 @@ func searchCurrentDirectoryUsingGrep(owner, repo, stringToMatch string) []grepRe
 	grepOutputLines := strings.Split(string(grepOutput), "\n")
 	for _, grepOutputLine := range grepOutputLines {
 
+		// split into filename, line number and matched string (separated by colons but can also contain colons)
 		parts := strings.Split(grepOutputLine, ":")
 		if len(parts) < 3 {
 			continue
@@ -167,6 +168,7 @@ func searchCurrentDirectoryUsingGrep(owner, repo, stringToMatch string) []grepRe
 			partsCount++
 		}
 
+		// remove log timestamp for equivalence check
 		matchedString := strings.Join(parts[partsCount:], ":")
 		matchedStringParts := strings.Fields(matchedString)
 		sanitisedMatchedString := strings.Join(matchedStringParts[1:], " ")

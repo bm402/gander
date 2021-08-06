@@ -13,6 +13,10 @@ func DownloadRepoLogs(owner, repo string, threads int) {
 	logger.Print(owner, repo, "get-run-ids", "Getting run ids")
 	runIds := retrieval.GetAllRunIdsForRepo(gh, owner, repo, threads)
 	logger.Print(owner, repo, "get-run-ids", "Found", len(runIds), "run ids")
+	if len(runIds) < 1 {
+		logger.Print(owner, repo, "download-logs", "No logs found, skipping")
+		return
+	}
 
 	logger.Print(owner, repo, "download-logs", "Downloading log files")
 	downloads := retrieval.DownloadLogsFromRunIds(gh, owner, repo, runIds, threads)
