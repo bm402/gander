@@ -116,7 +116,7 @@ func getLogUrl(gh *github.Client, owner, repo string, runId int64, thread int) (
 			resp.Body.Close()
 			redirectUrl, resp, err = gh.Actions.GetWorkflowRunLogs(context.TODO(), owner, repo, runId, true)
 		} else {
-			// logger.Print(owner, repo, "download-logs", "Could not get redirect url:", err.Error())
+			logger.Print(owner, repo, "download-logs", "Could not get redirect url:", err.Error(), string(respBodyBytes))
 			return "", err
 		}
 	}
