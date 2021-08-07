@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"os/exec"
+
 	"github.com/bm402/gander/internal/explore"
 	"github.com/bm402/gander/internal/logger"
 	"github.com/bm402/gander/internal/retrieval"
@@ -14,7 +16,7 @@ func DownloadRepoLogs(owner, repo string, threads int) {
 	runIds := retrieval.GetAllRunIdsForRepo(gh, owner, repo, threads)
 	logger.Print(owner, repo, "get-run-ids", "Found", len(runIds), "run ids")
 	if len(runIds) < 1 {
-		logger.Print(owner, repo, "download-logs", "No logs found, skipping")
+		logger.Print(owner, repo, "download-logs", "No logs found, skipping download")
 		return
 	}
 
@@ -24,6 +26,12 @@ func DownloadRepoLogs(owner, repo string, threads int) {
 }
 
 func SearchLogs(owner, repo, wordlistVariables, wordlistKeywords string, threads int) {
+	err := exec.Command("ls", owner+"/"+repo).Run()
+	if err != nil {
+		logger.Print(owner, repo, "search-logs", owner+"/"+repo, "does not exist, skipping search")
+		return
+	}
+
 	if len(wordlistVariables) > 0 {
 		logger.Print(owner, repo, "search-logs", "Searching logs for variable assignments")
 		matches := explore.SearchLogsForVariableAssignments(owner, repo, wordlistVariables, threads)
