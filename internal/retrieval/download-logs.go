@@ -108,7 +108,13 @@ func getLogUrl(gh *github.Client, owner, repo string, runId int64, thread int) (
 			resp.Body.Close()
 			redirectUrl, resp, err = gh.Actions.GetWorkflowRunLogs(context.TODO(), owner, repo, runId, true)
 		} else if resp.StatusCode == 403 && strings.Contains(string(respBodyBytes), "secondary rate limit") {
-			rateReset := time.Now().Add(5 * time.Minute)
+			var rateReset time.Time
+			if retryAfters, ok := resp.Header["Retry-After"]; ok {
+				retryAfter, _ := strconv.Atoi(retryAfters[0])
+				rateReset = time.Now().Add(time.Duration(retryAfter+5) * time.Second)
+			} else {
+				rateReset = time.Now().Add(5 * time.Minute)
+			}
 			if thread == 0 {
 				logger.Print(owner, repo, "download-logs", "Secondary rate limit hit, waiting for reset at", rateReset.String())
 			}

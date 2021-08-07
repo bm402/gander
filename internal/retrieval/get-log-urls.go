@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/ioutil"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -97,7 +98,13 @@ func getWorkflowRunsByPage(gh *github.Client, owner, repo string, page, thread i
 				},
 			})
 		} else if resp.StatusCode == 403 && strings.Contains(string(respBodyBytes), "secondary rate limit") {
-			rateReset := time.Now().Add(5 * time.Minute)
+			var rateReset time.Time
+			if retryAfters, ok := resp.Header["Retry-After"]; ok {
+				retryAfter, _ := strconv.Atoi(retryAfters[0])
+				rateReset = time.Now().Add(time.Duration(retryAfter+5) * time.Second)
+			} else {
+				rateReset = time.Now().Add(5 * time.Minute)
+			}
 			if thread == 0 {
 				logger.Print(owner, repo, "get-run-ids", "Secondary rate limit hit, waiting for reset at", rateReset.String())
 			}
