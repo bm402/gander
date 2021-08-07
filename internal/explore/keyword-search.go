@@ -19,9 +19,11 @@ type grepResult struct {
 }
 
 type collectedResult struct {
-	filename string
-	line     string
-	count    int
+	filename       string
+	line           string
+	matchedString  string
+	exactMatches   int
+	similarMatches int
 }
 
 func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads int) int {
@@ -30,17 +32,18 @@ func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads 
 
 	wg := sync.WaitGroup{}
 	variableAssignments := make(chan string, 2*len(variableNames))
-	distinctMatchesFound := int64(0)
+	matchesFound := int64(0)
 
 	// create worker threads
 	for i := 0; i < threads; i++ {
 		go func(owner, repo string, variableAssignments <-chan string) {
 			for variableAssignment := range variableAssignments {
-				collectedResults := collectSearchResults(owner, repo, variableAssignment)
-				for matchedString, detail := range collectedResults {
-					atomic.AddInt64(&distinctMatchesFound, 1)
-					logger.Print(owner, repo, "search-variables", "Found", matchedString, "at",
-						detail.filename+":"+detail.line+",", "and", detail.count-1, "other occurrences")
+				collectedResults := collectSearchResults(owner, repo, "nrio", variableAssignment)
+				if collectedResults.filename != "" {
+					atomic.AddInt64(&matchesFound, 1)
+					logger.Print(owner, repo, "search-keywords", "Found", collectedResults.matchedString, "at",
+						collectedResults.filename+":"+collectedResults.line+",", "with", collectedResults.exactMatches,
+						"exact matches and", collectedResults.similarMatches, "similar matches")
 				}
 				wg.Done()
 			}
@@ -48,19 +51,16 @@ func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads 
 	}
 
 	// add variable assignments to channel to trigger workers
-	assigners := []string{"=", ":"}
 	for _, variableName := range variableNames {
-		for _, assigner := range assigners {
-			wg.Add(1)
-			variableAssignments <- variableName + assigner
-		}
+		wg.Add(1)
+		variableAssignments <- variableName + "\\ *[:=]\\ *\\([^\\ &]\\+\\)"
 	}
 
 	// close channel and wait for threads to finish
 	close(variableAssignments)
 	wg.Wait()
 
-	return int(distinctMatchesFound)
+	return int(matchesFound)
 }
 
 func SearchLogsForKeywords(owner, repo, wordlistPath string, threads int) int {
@@ -69,17 +69,18 @@ func SearchLogsForKeywords(owner, repo, wordlistPath string, threads int) int {
 
 	wg := sync.WaitGroup{}
 	keywordsChan := make(chan string, len(keywords))
-	distinctMatchesFound := int64(0)
+	matchesFound := int64(0)
 
 	// create worker threads
 	for i := 0; i < threads; i++ {
 		go func(owner, repo string, keywordsChan <-chan string) {
 			for keyword := range keywordsChan {
-				collectedResults := collectSearchResults(owner, repo, keyword)
-				for matchedString, detail := range collectedResults {
-					atomic.AddInt64(&distinctMatchesFound, 1)
-					logger.Print(owner, repo, "search-keywords", "Found", matchedString, "at",
-						detail.filename+":"+detail.line+",", "and", detail.count-1, "other occurrences")
+				collectedResults := collectSearchResults(owner, repo, "nri", keyword)
+				if collectedResults.filename != "" {
+					atomic.AddInt64(&matchesFound, 1)
+					logger.Print(owner, repo, "search-keywords", "Found", collectedResults.matchedString, "at",
+						collectedResults.filename+":"+collectedResults.line+",", "with", collectedResults.exactMatches,
+						"exact matches and", collectedResults.similarMatches, "similar matches")
 				}
 				wg.Done()
 			}
@@ -96,7 +97,7 @@ func SearchLogsForKeywords(owner, repo, wordlistPath string, threads int) int {
 	close(keywordsChan)
 	wg.Wait()
 
-	return int(distinctMatchesFound)
+	return int(matchesFound)
 }
 
 func getWordsFromWordlist(wordlistPath string) []string {
@@ -117,30 +118,35 @@ func getWordsFromWordlist(wordlistPath string) []string {
 	return words
 }
 
-func collectSearchResults(owner, repo, stringToMatch string) map[string]collectedResult {
-	collectedResults := make(map[string]collectedResult)
-	grepResults := searchRepoDirectoryUsingGrep(owner, repo, stringToMatch)
+func collectSearchResults(owner, repo, grepOpts, stringToMatch string) collectedResult {
+	grepResults := searchRepoDirectoryUsingGrep(owner, repo, grepOpts, stringToMatch)
+	collectedResults := collectedResult{
+		exactMatches:   0,
+		similarMatches: 0,
+	}
 
-	for _, result := range grepResults {
-		if _, ok := collectedResults[result.matchedString]; ok {
-			updatedCollectedResult := collectedResults[result.matchedString]
-			updatedCollectedResult.count++
-			collectedResults[result.matchedString] = updatedCollectedResult
+	if len(grepResults) > 0 {
+		collectedResults.filename = grepResults[0].filename
+		collectedResults.line = grepResults[0].line
+		collectedResults.matchedString = grepResults[0].matchedString
+	} else {
+		return collectedResults
+	}
+
+	for _, result := range grepResults[1:] {
+		if result.matchedString == collectedResults.matchedString {
+			collectedResults.exactMatches++
 		} else {
-			collectedResults[result.matchedString] = collectedResult{
-				filename: result.filename,
-				line:     result.line,
-				count:    1,
-			}
+			collectedResults.similarMatches++
 		}
 	}
 
 	return collectedResults
 }
 
-func searchRepoDirectoryUsingGrep(owner, repo, stringToMatch string) []grepResult {
+func searchRepoDirectoryUsingGrep(owner, repo, grepOpts, stringToMatch string) []grepResult {
 	grepResults := []grepResult{}
-	grepOutput, err := exec.Command("grep", "-nri", stringToMatch, owner+"/"+repo).Output()
+	grepOutput, err := exec.Command("grep", "-"+grepOpts, stringToMatch, owner+"/"+repo).Output()
 	if err != nil && err.Error() != "exit status 1" {
 		logger.Print(owner, repo, "search-grep", "Could not search for", stringToMatch, "using grep:", err.Error())
 	}
@@ -161,22 +167,25 @@ func searchRepoDirectoryUsingGrep(owner, repo, stringToMatch string) []grepResul
 		for {
 			if _, err := strconv.Atoi(parts[partsCount]); err != nil {
 				filename += ":" + parts[partsCount]
+				partsCount++
 			} else {
 				line = parts[partsCount]
+				partsCount++
 				break
 			}
-			partsCount++
 		}
 
 		// remove log timestamp for equivalence check
 		matchedString := strings.Join(parts[partsCount:], ":")
-		matchedStringParts := strings.Fields(matchedString)
-		sanitisedMatchedString := strings.Join(matchedStringParts[1:], " ")
+		if !strings.Contains(grepOpts, "o") {
+			matchedStringParts := strings.Fields(matchedString)
+			matchedString = strings.Join(matchedStringParts[1:], " ")
+		}
 
 		grepResults = append(grepResults, grepResult{
 			filename:      filename,
 			line:          line,
-			matchedString: sanitisedMatchedString,
+			matchedString: matchedString,
 		})
 	}
 

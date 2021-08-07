@@ -35,7 +35,7 @@ func SearchLogs(owner, repo, wordlistVariables, wordlistKeywords string, threads
 	if len(wordlistVariables) > 0 {
 		logger.Print(owner, repo, "search-logs", "Searching logs for variable assignments")
 		matches := explore.SearchLogsForVariableAssignments(owner, repo, wordlistVariables, threads)
-		logger.Print(owner, repo, "search-logs", "A total of", matches, "distinct variable assignments found")
+		logger.Print(owner, repo, "search-logs", "Finished search,", matches, "variable assignments found")
 	} else {
 		logger.Print(owner, repo, "search-logs", "No variable names wordlist provided")
 	}
@@ -43,7 +43,7 @@ func SearchLogs(owner, repo, wordlistVariables, wordlistKeywords string, threads
 	if len(wordlistKeywords) > 0 {
 		logger.Print(owner, repo, "search-logs", "Searching logs for keywords")
 		matches := explore.SearchLogsForKeywords(owner, repo, wordlistKeywords, threads)
-		logger.Print(owner, repo, "search-logs", "A total of", matches, "distinct keywords found")
+		logger.Print(owner, repo, "search-logs", "Finished search", matches, "keywords found")
 	} else {
 		logger.Print(owner, repo, "search-logs", "No keywords wordlist provided")
 	}
