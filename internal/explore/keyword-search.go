@@ -12,18 +12,30 @@ import (
 	"github.com/bm402/gander/internal/logger"
 )
 
+var DUPLICATE_RESULTS_THRESHOLD = 20
+
 type grepResult struct {
 	filename      string
 	line          string
 	matchedString string
 }
 
+type condensedResultByFileKey struct {
+	filename      string
+	matchedString string
+}
+
+type condensedResultByFileValue struct {
+	line        string
+	occurrences int
+}
+
 type collectedResult struct {
-	filename       string
-	line           string
-	matchedString  string
-	exactMatches   int
-	similarMatches int
+	filename    string
+	line        string
+	files       int
+	occurrences int
+	isCondensed bool
 }
 
 func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads int) int {
@@ -39,11 +51,17 @@ func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads 
 		go func(owner, repo string, variableAssignments <-chan string) {
 			for variableAssignment := range variableAssignments {
 				collectedResults := collectSearchResults(owner, repo, variableAssignment)
-				if collectedResults.filename != "" {
+				for matchedString, result := range collectedResults {
 					atomic.AddInt64(&matchesFound, 1)
-					logger.Print(owner, repo, "\033[1;91mmatched-variable\033[0m", "Found", collectedResults.matchedString, "at",
-						collectedResults.filename+":"+collectedResults.line+",", "with", collectedResults.exactMatches,
-						"exact matches and", collectedResults.similarMatches, "similar matches")
+					if result.isCondensed {
+						logger.Print(owner, repo, "\033[1;91mmatched-variable\033[0m", "Found", matchedString, "at",
+							result.filename+":"+result.line+", with", result.occurrences, "similar occurrences in",
+							result.files, "files (probably randomly generated)")
+					} else {
+						logger.Print(owner, repo, "\033[1;91mmatched-variable\033[0m", "Found", matchedString, "at",
+							result.filename+":"+result.line+", with", result.occurrences, "occurrences in",
+							result.files, "files")
+					}
 				}
 				wg.Done()
 			}
@@ -53,7 +71,7 @@ func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads 
 	// add variable assignments to channel to trigger workers
 	for _, variableName := range variableNames {
 		wg.Add(1)
-		variableAssignments <- variableName + "\\ *[:=]\\ *\\([^\\ &\\\"']\\+\\)"
+		variableAssignments <- variableName + "\\ *[:=]\\ *\\([^\\ &]\\+\\)"
 	}
 
 	// close channel and wait for threads to finish
@@ -76,11 +94,17 @@ func SearchLogsForKeywords(owner, repo, wordlistPath string, threads int) int {
 		go func(owner, repo string, keywordsChan <-chan string) {
 			for keyword := range keywordsChan {
 				collectedResults := collectSearchResults(owner, repo, keyword)
-				if collectedResults.filename != "" {
+				for matchedString, result := range collectedResults {
 					atomic.AddInt64(&matchesFound, 1)
-					logger.Print(owner, repo, "\033[1;91mmatched-keyword\033[0m", "Found", collectedResults.matchedString, "at",
-						collectedResults.filename+":"+collectedResults.line+",", "with", collectedResults.exactMatches,
-						"exact matches and", collectedResults.similarMatches, "similar matches")
+					if result.isCondensed {
+						logger.Print(owner, repo, "\033[1;91mmatched-keyword\033[0m", "Found", matchedString, "at",
+							result.filename+":"+result.line+", with", result.occurrences, "similar occurrences in",
+							result.files, "files (probably randomly generated)")
+					} else {
+						logger.Print(owner, repo, "\033[1;91mmatched-keyword\033[0m", "Found", matchedString, "at",
+							result.filename+":"+result.line+", with", result.occurrences, "occurrences in",
+							result.files, "files")
+					}
 				}
 				wg.Done()
 			}
@@ -118,27 +142,76 @@ func getWordsFromWordlist(wordlistPath string) []string {
 	return words
 }
 
-func collectSearchResults(owner, repo, stringToMatch string) collectedResult {
+func collectSearchResults(owner, repo, stringToMatch string) map[string]collectedResult {
 	grepResults := searchRepoDirectoryUsingGrep(owner, repo, stringToMatch)
-	collectedResults := collectedResult{
-		exactMatches:   0,
-		similarMatches: 0,
-	}
 
-	if len(grepResults) > 0 {
-		collectedResults.filename = grepResults[0].filename
-		collectedResults.line = grepResults[0].line
-		collectedResults.matchedString = grepResults[0].matchedString
-	} else {
-		return collectedResults
-	}
-
-	for _, result := range grepResults[1:] {
-		if result.matchedString == collectedResults.matchedString {
-			collectedResults.exactMatches++
-		} else {
-			collectedResults.similarMatches++
+	// condense grep results into files: matchedString, filename => line (first occurrence), occurrences
+	condensedResultsByFile := make(map[condensedResultByFileKey]condensedResultByFileValue)
+	for _, grepResult := range grepResults {
+		fileMatchKey := condensedResultByFileKey{
+			filename:      grepResult.filename,
+			matchedString: grepResult.matchedString,
 		}
+		if existingFileMatchOccurrences, exists := condensedResultsByFile[fileMatchKey]; exists {
+			updatedFileMatchOccurrences := existingFileMatchOccurrences
+			updatedFileMatchOccurrences.occurrences++
+			condensedResultsByFile[fileMatchKey] = updatedFileMatchOccurrences
+		} else {
+			condensedResultsByFile[fileMatchKey] = condensedResultByFileValue{
+				line:        grepResult.line,
+				occurrences: 1,
+			}
+		}
+	}
+
+	// condense file occurrences into global occurrences: matchedString => filename (first occurrence), line (first occurrence), files, occurrences
+	collectedResults := make(map[string]collectedResult)
+	for fileMatch, occurrences := range condensedResultsByFile {
+		if existingCollectedResult, exists := collectedResults[fileMatch.matchedString]; exists {
+			updatedCollectedResult := existingCollectedResult
+			updatedCollectedResult.files++
+			updatedCollectedResult.occurrences += occurrences.occurrences
+			collectedResults[fileMatch.matchedString] = updatedCollectedResult
+		} else {
+			collectedResults[fileMatch.matchedString] = collectedResult{
+				filename:    fileMatch.filename,
+				line:        occurrences.line,
+				files:       1,
+				occurrences: occurrences.occurrences,
+				isCondensed: false,
+			}
+		}
+	}
+
+	// if more than n matchedStrings, combine occurrences in only a single file to one log entry as they are probably randomly generated
+	if len(collectedResults) > DUPLICATE_RESULTS_THRESHOLD {
+		matchedStringsToDelete := []string{}
+		firstMatchedString := ""
+		condensedResult := collectedResult{
+			isCondensed: true,
+		}
+
+		for matchedString, result := range collectedResults {
+			if result.files < 2 {
+				matchedStringsToDelete = append(matchedStringsToDelete, matchedString)
+				if firstMatchedString != "" {
+					condensedResult.files += result.files
+					condensedResult.occurrences += result.occurrences
+				} else {
+					firstMatchedString = matchedString
+					condensedResult.filename = result.filename
+					condensedResult.line = result.line
+					condensedResult.files = result.files
+					condensedResult.occurrences = result.occurrences
+				}
+			}
+		}
+
+		for _, matchedStringToDelete := range matchedStringsToDelete {
+			delete(collectedResults, matchedStringToDelete)
+		}
+
+		collectedResults[firstMatchedString] = condensedResult
 	}
 
 	return collectedResults
