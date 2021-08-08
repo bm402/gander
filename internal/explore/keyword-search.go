@@ -12,16 +12,30 @@ import (
 	"github.com/bm402/gander/internal/logger"
 )
 
+var DUPLICATE_RESULTS_THRESHOLD = 20
+
 type grepResult struct {
 	filename      string
 	line          string
 	matchedString string
 }
 
+type condensedResultByFileKey struct {
+	filename      string
+	matchedString string
+}
+
+type condensedResultByFileValue struct {
+	line        string
+	occurrences int
+}
+
 type collectedResult struct {
-	filename string
-	line     string
-	count    int
+	filename    string
+	line        string
+	files       int
+	occurrences int
+	isCondensed bool
 }
 
 func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads int) int {
@@ -30,17 +44,23 @@ func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads 
 
 	wg := sync.WaitGroup{}
 	variableAssignments := make(chan string, 2*len(variableNames))
-	distinctMatchesFound := int64(0)
+	matchesFound := int64(0)
 
 	// create worker threads
 	for i := 0; i < threads; i++ {
 		go func(owner, repo string, variableAssignments <-chan string) {
 			for variableAssignment := range variableAssignments {
 				collectedResults := collectSearchResults(owner, repo, variableAssignment)
-				for matchedString, detail := range collectedResults {
-					atomic.AddInt64(&distinctMatchesFound, 1)
-					logger.Print(owner, repo, "search-variables", "Found", matchedString, "at",
-						detail.filename+":"+detail.line+",", "and", detail.count-1, "other occurrences")
+				for matchedString, result := range collectedResults {
+					atomic.AddInt64(&matchesFound, 1)
+					if result.isCondensed {
+						logger.Print(owner, repo, "\033[1;91mmatched-variable\033[0m", "Found", matchedString, "at",
+							result.filename+":"+result.line+", with", result.occurrences, "similar occurrences (probably randomly generated)")
+					} else {
+						logger.Print(owner, repo, "\033[1;91mmatched-variable\033[0m", "Found", matchedString, "at",
+							result.filename+":"+result.line+", with", result.occurrences, "occurrences in",
+							result.files, "files")
+					}
 				}
 				wg.Done()
 			}
@@ -48,19 +68,16 @@ func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads 
 	}
 
 	// add variable assignments to channel to trigger workers
-	assigners := []string{"=", ":"}
 	for _, variableName := range variableNames {
-		for _, assigner := range assigners {
-			wg.Add(1)
-			variableAssignments <- variableName + assigner
-		}
+		wg.Add(1)
+		variableAssignments <- variableName + "\\ *[:=]\\ *\\([^\\ &]\\+\\)"
 	}
 
 	// close channel and wait for threads to finish
 	close(variableAssignments)
 	wg.Wait()
 
-	return int(distinctMatchesFound)
+	return int(matchesFound)
 }
 
 func SearchLogsForKeywords(owner, repo, wordlistPath string, threads int) int {
@@ -69,17 +86,23 @@ func SearchLogsForKeywords(owner, repo, wordlistPath string, threads int) int {
 
 	wg := sync.WaitGroup{}
 	keywordsChan := make(chan string, len(keywords))
-	distinctMatchesFound := int64(0)
+	matchesFound := int64(0)
 
 	// create worker threads
 	for i := 0; i < threads; i++ {
 		go func(owner, repo string, keywordsChan <-chan string) {
 			for keyword := range keywordsChan {
 				collectedResults := collectSearchResults(owner, repo, keyword)
-				for matchedString, detail := range collectedResults {
-					atomic.AddInt64(&distinctMatchesFound, 1)
-					logger.Print(owner, repo, "search-keywords", "Found", matchedString, "at",
-						detail.filename+":"+detail.line+",", "and", detail.count-1, "other occurrences")
+				for matchedString, result := range collectedResults {
+					atomic.AddInt64(&matchesFound, 1)
+					if result.isCondensed {
+						logger.Print(owner, repo, "\033[1;91mmatched-keyword\033[0m", "Found", matchedString, "at",
+							result.filename+":"+result.line+", with", result.occurrences, "similar occurrences (probably randomly generated)")
+					} else {
+						logger.Print(owner, repo, "\033[1;91mmatched-keyword\033[0m", "Found", matchedString, "at",
+							result.filename+":"+result.line+", with", result.occurrences, "occurrences in",
+							result.files, "files")
+					}
 				}
 				wg.Done()
 			}
@@ -96,7 +119,7 @@ func SearchLogsForKeywords(owner, repo, wordlistPath string, threads int) int {
 	close(keywordsChan)
 	wg.Wait()
 
-	return int(distinctMatchesFound)
+	return int(matchesFound)
 }
 
 func getWordsFromWordlist(wordlistPath string) []string {
@@ -118,29 +141,81 @@ func getWordsFromWordlist(wordlistPath string) []string {
 }
 
 func collectSearchResults(owner, repo, stringToMatch string) map[string]collectedResult {
-	collectedResults := make(map[string]collectedResult)
-	grepResults := searchCurrentDirectoryUsingGrep(owner, repo, stringToMatch)
+	grepResults := searchRepoDirectoryUsingGrep(owner, repo, stringToMatch)
 
-	for _, result := range grepResults {
-		if _, ok := collectedResults[result.matchedString]; ok {
-			updatedCollectedResult := collectedResults[result.matchedString]
-			updatedCollectedResult.count++
-			collectedResults[result.matchedString] = updatedCollectedResult
+	// condense grep results into files: matchedString, filename => line (first occurrence), occurrences
+	condensedResultsByFile := make(map[condensedResultByFileKey]condensedResultByFileValue)
+	for _, grepResult := range grepResults {
+		fileMatchKey := condensedResultByFileKey{
+			filename:      grepResult.filename,
+			matchedString: grepResult.matchedString,
+		}
+		if existingFileMatchOccurrences, exists := condensedResultsByFile[fileMatchKey]; exists {
+			updatedFileMatchOccurrences := existingFileMatchOccurrences
+			updatedFileMatchOccurrences.occurrences++
+			condensedResultsByFile[fileMatchKey] = updatedFileMatchOccurrences
 		} else {
-			collectedResults[result.matchedString] = collectedResult{
-				filename: result.filename,
-				line:     result.line,
-				count:    1,
+			condensedResultsByFile[fileMatchKey] = condensedResultByFileValue{
+				line:        grepResult.line,
+				occurrences: 1,
 			}
 		}
+	}
+
+	// condense file occurrences into global occurrences: matchedString => filename (first occurrence), line (first occurrence), files, occurrences
+	collectedResults := make(map[string]collectedResult)
+	for fileMatch, occurrences := range condensedResultsByFile {
+		if existingCollectedResult, exists := collectedResults[fileMatch.matchedString]; exists {
+			updatedCollectedResult := existingCollectedResult
+			updatedCollectedResult.files++
+			updatedCollectedResult.occurrences += occurrences.occurrences
+			collectedResults[fileMatch.matchedString] = updatedCollectedResult
+		} else {
+			collectedResults[fileMatch.matchedString] = collectedResult{
+				filename:    fileMatch.filename,
+				line:        occurrences.line,
+				files:       1,
+				occurrences: occurrences.occurrences,
+				isCondensed: false,
+			}
+		}
+	}
+
+	// if more than n matchedStrings, combine occurrences in only a single file to one log entry as they are probably randomly generated
+	if len(collectedResults) > DUPLICATE_RESULTS_THRESHOLD {
+		matchedStringsToDelete := []string{}
+		firstMatchedString := ""
+		condensedResult := collectedResult{
+			isCondensed: true,
+		}
+
+		for matchedString, result := range collectedResults {
+			if result.files < 2 {
+				matchedStringsToDelete = append(matchedStringsToDelete, matchedString)
+				if firstMatchedString != "" {
+					condensedResult.occurrences += result.occurrences
+				} else {
+					firstMatchedString = matchedString
+					condensedResult.filename = result.filename
+					condensedResult.line = result.line
+					condensedResult.occurrences = result.occurrences
+				}
+			}
+		}
+
+		for _, matchedStringToDelete := range matchedStringsToDelete {
+			delete(collectedResults, matchedStringToDelete)
+		}
+
+		collectedResults[firstMatchedString] = condensedResult
 	}
 
 	return collectedResults
 }
 
-func searchCurrentDirectoryUsingGrep(owner, repo, stringToMatch string) []grepResult {
+func searchRepoDirectoryUsingGrep(owner, repo, stringToMatch string) []grepResult {
 	grepResults := []grepResult{}
-	grepOutput, err := exec.Command("grep", "-nri", stringToMatch, ".").Output()
+	grepOutput, err := exec.Command("grep", "-nrio", stringToMatch, owner+"/"+repo).Output()
 	if err != nil && err.Error() != "exit status 1" {
 		logger.Print(owner, repo, "search-grep", "Could not search for", stringToMatch, "using grep:", err.Error())
 	}
@@ -148,6 +223,7 @@ func searchCurrentDirectoryUsingGrep(owner, repo, stringToMatch string) []grepRe
 	grepOutputLines := strings.Split(string(grepOutput), "\n")
 	for _, grepOutputLine := range grepOutputLines {
 
+		// split into filename, line number and matched string (separated by colons but can also contain colons)
 		parts := strings.Split(grepOutputLine, ":")
 		if len(parts) < 3 {
 			continue
@@ -160,21 +236,19 @@ func searchCurrentDirectoryUsingGrep(owner, repo, stringToMatch string) []grepRe
 		for {
 			if _, err := strconv.Atoi(parts[partsCount]); err != nil {
 				filename += ":" + parts[partsCount]
+				partsCount++
 			} else {
 				line = parts[partsCount]
+				partsCount++
 				break
 			}
-			partsCount++
 		}
 
-		matchedString := strings.Join(parts[partsCount:], ":")
-		matchedStringParts := strings.Fields(matchedString)
-		sanitisedMatchedString := strings.Join(matchedStringParts[1:], " ")
-
+		matchedString := strings.TrimSpace(strings.Join(parts[partsCount:], ":"))
 		grepResults = append(grepResults, grepResult{
 			filename:      filename,
 			line:          line,
-			matchedString: sanitisedMatchedString,
+			matchedString: matchedString,
 		})
 	}
 

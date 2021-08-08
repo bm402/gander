@@ -14,7 +14,8 @@ func main() {
 	repo := flag.String("r", "", "The name of the repository")
 	wordlistVariables := flag.String("wv", "", "The wordlist of variable names")
 	wordlistKeywords := flag.String("wk", "", "The wordlist of keywords")
-	threads := flag.Int("t", 10, "Number of threads")
+	threadsDownload := flag.Int("td", 5, "Number of threads for download (be wary of GitHub API rate limits)")
+	threadsSearch := flag.Int("ts", 20, "Number of threads for search")
 	flag.Parse()
 
 	if !*isDownload && !*isSearch {
@@ -27,10 +28,10 @@ func main() {
 	}
 
 	if *isDownload {
-		workflow.DownloadRepoLogs(*owner, *repo, *threads)
+		workflow.DownloadRepoLogs(*owner, *repo, *threadsDownload)
 	}
 
 	if *isSearch {
-		workflow.SearchLogs(*owner, *repo, *wordlistVariables, *wordlistKeywords, *threads)
+		workflow.SearchLogs(*owner, *repo, *wordlistVariables, *wordlistKeywords, *threadsSearch)
 	}
 }
