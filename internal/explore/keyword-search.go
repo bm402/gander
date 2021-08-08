@@ -55,8 +55,7 @@ func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads 
 					atomic.AddInt64(&matchesFound, 1)
 					if result.isCondensed {
 						logger.Print(owner, repo, "\033[1;91mmatched-variable\033[0m", "Found", matchedString, "at",
-							result.filename+":"+result.line+", with", result.occurrences, "similar occurrences in",
-							result.files, "files (probably randomly generated)")
+							result.filename+":"+result.line+", with", result.occurrences, "similar occurrences (probably randomly generated)")
 					} else {
 						logger.Print(owner, repo, "\033[1;91mmatched-variable\033[0m", "Found", matchedString, "at",
 							result.filename+":"+result.line+", with", result.occurrences, "occurrences in",
@@ -98,8 +97,7 @@ func SearchLogsForKeywords(owner, repo, wordlistPath string, threads int) int {
 					atomic.AddInt64(&matchesFound, 1)
 					if result.isCondensed {
 						logger.Print(owner, repo, "\033[1;91mmatched-keyword\033[0m", "Found", matchedString, "at",
-							result.filename+":"+result.line+", with", result.occurrences, "similar occurrences in",
-							result.files, "files (probably randomly generated)")
+							result.filename+":"+result.line+", with", result.occurrences, "similar occurrences (probably randomly generated)")
 					} else {
 						logger.Print(owner, repo, "\033[1;91mmatched-keyword\033[0m", "Found", matchedString, "at",
 							result.filename+":"+result.line+", with", result.occurrences, "occurrences in",
@@ -195,13 +193,11 @@ func collectSearchResults(owner, repo, stringToMatch string) map[string]collecte
 			if result.files < 2 {
 				matchedStringsToDelete = append(matchedStringsToDelete, matchedString)
 				if firstMatchedString != "" {
-					condensedResult.files += result.files
 					condensedResult.occurrences += result.occurrences
 				} else {
 					firstMatchedString = matchedString
 					condensedResult.filename = result.filename
 					condensedResult.line = result.line
-					condensedResult.files = result.files
 					condensedResult.occurrences = result.occurrences
 				}
 			}
