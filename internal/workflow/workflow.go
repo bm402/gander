@@ -69,7 +69,7 @@ func scanOrganisationRepoLogs(gh *github.Client, opts Opts) {
 	for idx, repo := range repos {
 		*opts.Owner = *opts.Organisation
 		*opts.Repo = repo
-		logger.Print(*opts.Organisation, repo, "scan-org-repo-logs", "Scanning", *opts.Owner+"/"+*opts.Repo,
+		logger.Print(*opts.Owner, *opts.Repo, "scan-org-repo-logs", "Scanning", *opts.Owner+"/"+*opts.Repo,
 			fmt.Sprint("(", idx+1, "/", len(repos)), "repos in org)")
 		scanRepoLogs(gh, opts)
 	}
@@ -88,7 +88,7 @@ func scanOrganisationMembersRepoLogs(gh *github.Client, opts Opts) {
 		parts := strings.Split(repo, "/")
 		*opts.Owner = parts[0]
 		*opts.Repo = parts[1]
-		logger.Print(*opts.Organisation, repo, "scan-org-members-repo-logs", "Scanning", *opts.Owner+"/"+*opts.Repo,
+		logger.Print(*opts.Owner, *opts.Repo, "scan-org-members-repo-logs", "Scanning", *opts.Owner+"/"+*opts.Repo,
 			fmt.Sprint("(", idx+1, "/", len(repos)), "members repos in org)")
 		scanRepoLogs(gh, opts)
 	}
