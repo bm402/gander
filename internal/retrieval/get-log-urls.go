@@ -116,7 +116,10 @@ func getWorkflowRunsByPage(gh *github.Client, owner, repo string, page, thread i
 			})
 		} else {
 			logger.Print(owner, repo, "get-run-ids", "Could not retrieve page", page, "workflow runs:", err.Error())
-			workflowRuns, err = &github.WorkflowRuns{}, nil
+			totalCount := 0
+			workflowRuns, err = &github.WorkflowRuns{
+				TotalCount: &totalCount,
+			}, nil
 		}
 	}
 
