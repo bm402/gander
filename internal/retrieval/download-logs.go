@@ -36,8 +36,8 @@ func DownloadLogsFromRunIds(gh *github.Client, owner, repo string, runIds []int6
 					wg.Done()
 					continue
 				}
-				// status update in 5% increments
-				if len(runIds) >= 20 && idConfig.count > 0 && idConfig.count%fivePercent == 0 {
+				// status update in 5% increments if lots of downloads
+				if len(runIds) > 500 && idConfig.count > 0 && idConfig.count%fivePercent == 0 {
 					logger.Print(owner, repo, "download-logs", idConfig.count, "downloads attempted",
 						"("+strconv.Itoa((idConfig.count/fivePercent)*5)+"%)")
 				}
