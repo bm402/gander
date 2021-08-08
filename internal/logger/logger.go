@@ -6,7 +6,11 @@ import (
 )
 
 func Print(owner, repo, operation string, messages ...interface{}) {
-	entry := "[" + owner + "][" + repo + "][" + operation + "]"
+	entry := "[" + owner + "]"
+	if len(repo) > 0 {
+		entry += "[" + repo + "]"
+	}
+	entry += "[" + operation + "]"
 	for _, message := range messages {
 		entry += " " + fmt.Sprint(message)
 	}
@@ -14,10 +18,10 @@ func Print(owner, repo, operation string, messages ...interface{}) {
 }
 
 func Fatal(messages ...interface{}) {
-	fmt.Print("[fatal]")
+	entry := "[fatal]"
 	for _, message := range messages {
-		fmt.Print(" ", message)
+		entry += " " + fmt.Sprint(message)
 	}
-	fmt.Println()
+	fmt.Println(entry)
 	os.Exit(1)
 }

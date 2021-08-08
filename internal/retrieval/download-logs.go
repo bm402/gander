@@ -15,8 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var GONE_RESPONSE_THRESHOLD = int64(200)
-
 type runIdConfig struct {
 	id    int64
 	count int

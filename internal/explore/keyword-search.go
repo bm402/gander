@@ -12,8 +12,6 @@ import (
 	"github.com/bm402/gander/internal/logger"
 )
 
-var DUPLICATE_RESULTS_THRESHOLD = 20
-
 type grepResult struct {
 	filename      string
 	line          string

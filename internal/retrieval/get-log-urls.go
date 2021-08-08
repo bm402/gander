@@ -13,8 +13,6 @@ import (
 	"github.com/google/go-github/v37/github"
 )
 
-var PAGE_SIZE = 100
-
 func GetAllRunIdsForRepo(gh *github.Client, owner, repo string, threads int) []int64 {
 	// get first page of workflow runs
 	workflowRunsFirstPage := getWorkflowRunsByPage(gh, owner, repo, 1, 0)
