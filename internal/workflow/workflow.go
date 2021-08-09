@@ -32,11 +32,8 @@ func Run(opts Opts) {
 		*opts.IsSearch = true
 	}
 
-	var gh *github.Client
-	if *opts.IsDownload {
-		logger.Print("gander", "", "run", "Creating GitHub client")
-		gh = githubconfig.CreateGitHubClient()
-	}
+	logger.Print("gander", "", "run", "Creating GitHub client")
+	gh := githubconfig.CreateGitHubClient()
 
 	if *opts.Organisation != "" {
 		if !*opts.IsOrgRepos && !*opts.IsOrgMembersRepos {
@@ -197,6 +194,8 @@ func appendGlobalCollectedResults(globalCollectedResults, collectedResultsToAppe
 				updatedGlobalCollectedResult.Occurrences += collectedResultToAppend.Occurrences
 				globalCollectedResults[matchedString] = updatedGlobalCollectedResult
 			}
+		} else {
+			globalCollectedResults[matchedString] = collectedResultToAppend
 		}
 	}
 }
