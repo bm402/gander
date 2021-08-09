@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/bm402/gander/internal/logger"
 )
@@ -28,36 +27,40 @@ type condensedResultByFileValue struct {
 	occurrences int
 }
 
-type collectedResult struct {
-	filename    string
-	line        string
-	files       int
-	occurrences int
-	isCondensed bool
+type CollectedResult struct {
+	Filename    string
+	Line        string
+	Files       int
+	Occurrences int
+	IsCondensed bool
 }
 
-func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads int) int {
+func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads int) map[string]CollectedResult {
 	variableNames := getWordsFromWordlist(wordlistPath)
 	logger.Print(owner, repo, "search-variables", "Read", len(variableNames), "variable names from wordlist")
 
 	wg := sync.WaitGroup{}
 	variableAssignments := make(chan string, 2*len(variableNames))
-	matchesFound := int64(0)
+	globalCollectedResults := make(map[string]CollectedResult)
+	mutex := &sync.Mutex{}
 
 	// create worker threads
 	for i := 0; i < threads; i++ {
 		go func(owner, repo string, variableAssignments <-chan string) {
 			for variableAssignment := range variableAssignments {
 				collectedResults := collectSearchResults(owner, repo, variableAssignment)
-				for matchedString, result := range collectedResults {
-					atomic.AddInt64(&matchesFound, 1)
-					if result.isCondensed {
+				for matchedString, collectedResult := range collectedResults {
+					mutex.Lock()
+					globalCollectedResults[matchedString] = collectedResult
+					mutex.Unlock()
+					if collectedResult.IsCondensed {
 						logger.Print(owner, repo, "\033[1;91mmatched-variable\033[0m", "Found", matchedString, "at",
-							result.filename+":"+result.line+", with", result.occurrences, "similar occurrences (probably randomly generated)")
+							collectedResult.Filename+":"+collectedResult.Line+", with", collectedResult.Occurrences,
+							"similar occurrences (probably randomly generated)")
 					} else {
 						logger.Print(owner, repo, "\033[1;91mmatched-variable\033[0m", "Found", matchedString, "at",
-							result.filename+":"+result.line+", with", result.occurrences, "occurrences in",
-							result.files, "files")
+							collectedResult.Filename+":"+collectedResult.Line+", with", collectedResult.Occurrences,
+							"occurrences in", collectedResult.Files, "files")
 					}
 				}
 				wg.Done()
@@ -75,31 +78,35 @@ func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads 
 	close(variableAssignments)
 	wg.Wait()
 
-	return int(matchesFound)
+	return globalCollectedResults
 }
 
-func SearchLogsForKeywords(owner, repo, wordlistPath string, threads int) int {
+func SearchLogsForKeywords(owner, repo, wordlistPath string, threads int) map[string]CollectedResult {
 	keywords := getWordsFromWordlist(wordlistPath)
 	logger.Print(owner, repo, "search-keywords", "Read", len(keywords), "keywords from wordlist")
 
 	wg := sync.WaitGroup{}
 	keywordsChan := make(chan string, len(keywords))
-	matchesFound := int64(0)
+	globalCollectedResults := make(map[string]CollectedResult)
+	mutex := &sync.Mutex{}
 
 	// create worker threads
 	for i := 0; i < threads; i++ {
 		go func(owner, repo string, keywordsChan <-chan string) {
 			for keyword := range keywordsChan {
 				collectedResults := collectSearchResults(owner, repo, keyword)
-				for matchedString, result := range collectedResults {
-					atomic.AddInt64(&matchesFound, 1)
-					if result.isCondensed {
+				for matchedString, collectedResult := range collectedResults {
+					mutex.Lock()
+					globalCollectedResults[matchedString] = collectedResult
+					mutex.Unlock()
+					if collectedResult.IsCondensed {
 						logger.Print(owner, repo, "\033[1;91mmatched-keyword\033[0m", "Found", matchedString, "at",
-							result.filename+":"+result.line+", with", result.occurrences, "similar occurrences (probably randomly generated)")
+							collectedResult.Filename+":"+collectedResult.Line+", with", collectedResult.Occurrences,
+							"similar occurrences (probably randomly generated)")
 					} else {
 						logger.Print(owner, repo, "\033[1;91mmatched-keyword\033[0m", "Found", matchedString, "at",
-							result.filename+":"+result.line+", with", result.occurrences, "occurrences in",
-							result.files, "files")
+							collectedResult.Filename+":"+collectedResult.Line+", with", collectedResult.Occurrences,
+							"occurrences in", collectedResult.Files, "files")
 					}
 				}
 				wg.Done()
@@ -117,7 +124,7 @@ func SearchLogsForKeywords(owner, repo, wordlistPath string, threads int) int {
 	close(keywordsChan)
 	wg.Wait()
 
-	return int(matchesFound)
+	return globalCollectedResults
 }
 
 func getWordsFromWordlist(wordlistPath string) []string {
@@ -138,7 +145,7 @@ func getWordsFromWordlist(wordlistPath string) []string {
 	return words
 }
 
-func collectSearchResults(owner, repo, stringToMatch string) map[string]collectedResult {
+func collectSearchResults(owner, repo, stringToMatch string) map[string]CollectedResult {
 	grepResults := searchRepoDirectoryUsingGrep(owner, repo, stringToMatch)
 
 	// condense grep results into files: matchedString, filename => line (first occurrence), occurrences
@@ -167,20 +174,20 @@ func collectSearchResults(owner, repo, stringToMatch string) map[string]collecte
 	}
 
 	// condense file occurrences into global occurrences: matchedString => filename (first occurrence), line (first occurrence), files, occurrences
-	collectedResults := make(map[string]collectedResult)
+	collectedResults := make(map[string]CollectedResult)
 	for fileMatch, occurrences := range condensedResultsByFile {
 		if existingCollectedResult, exists := collectedResults[fileMatch.matchedString]; exists {
 			updatedCollectedResult := existingCollectedResult
-			updatedCollectedResult.files++
-			updatedCollectedResult.occurrences += occurrences.occurrences
+			updatedCollectedResult.Files++
+			updatedCollectedResult.Occurrences += occurrences.occurrences
 			collectedResults[fileMatch.matchedString] = updatedCollectedResult
 		} else {
-			collectedResults[fileMatch.matchedString] = collectedResult{
-				filename:    fileMatch.filename,
-				line:        occurrences.line,
-				files:       1,
-				occurrences: occurrences.occurrences,
-				isCondensed: false,
+			collectedResults[fileMatch.matchedString] = CollectedResult{
+				Filename:    fileMatch.filename,
+				Line:        occurrences.line,
+				Files:       1,
+				Occurrences: occurrences.occurrences,
+				IsCondensed: false,
 			}
 		}
 	}
@@ -189,20 +196,20 @@ func collectSearchResults(owner, repo, stringToMatch string) map[string]collecte
 	if len(collectedResults) > DUPLICATE_RESULTS_THRESHOLD {
 		matchedStringsToDelete := []string{}
 		firstMatchedString := ""
-		condensedResult := collectedResult{
-			isCondensed: true,
+		condensedResult := CollectedResult{
+			IsCondensed: true,
 		}
 
 		for matchedString, result := range collectedResults {
-			if result.files < 2 {
+			if result.Files < 2 {
 				matchedStringsToDelete = append(matchedStringsToDelete, matchedString)
 				if firstMatchedString != "" {
-					condensedResult.occurrences += result.occurrences
+					condensedResult.Occurrences += result.Occurrences
 				} else {
 					firstMatchedString = matchedString
-					condensedResult.filename = result.filename
-					condensedResult.line = result.line
-					condensedResult.occurrences = result.occurrences
+					condensedResult.Filename = result.Filename
+					condensedResult.Line = result.Line
+					condensedResult.Occurrences = result.Occurrences
 				}
 			}
 		}

@@ -66,12 +66,27 @@ func scanOrganisationRepoLogs(gh *github.Client, opts Opts) {
 	repos := retrieval.GetOrganisationRepos(gh, *opts.Organisation)
 	logger.Print(*opts.Organisation, "", "scan-org-repo-logs", "Found", len(repos), "organisation repos")
 
+	globalCollectedResults := make(map[string]explore.CollectedResult)
 	for idx, repo := range repos {
 		*opts.Owner = *opts.Organisation
 		*opts.Repo = repo
 		logger.Print(*opts.Owner, *opts.Repo, "scan-org-repo-logs", "Scanning", *opts.Owner+"/"+*opts.Repo,
 			fmt.Sprint("(", idx+1, "/", len(repos)), "repos in org)")
-		scanRepoLogs(gh, opts)
+		collectedResults := scanRepoLogs(gh, opts)
+		appendGlobalCollectedResults(globalCollectedResults, collectedResults)
+	}
+
+	logger.Print(*opts.Organisation, "", "scan-org-repo-logs", "Finished scanning org repo logs")
+	for matchedString, collectedResult := range globalCollectedResults {
+		if collectedResult.IsCondensed {
+			logger.Print(*opts.Organisation, "", "summary", matchedString, "at",
+				collectedResult.Filename+":"+collectedResult.Line+", with", collectedResult.Occurrences,
+				"similar occurrences (probably randomly generated)")
+		} else {
+			logger.Print(*opts.Organisation, "", "summary", matchedString, "at",
+				collectedResult.Filename+":"+collectedResult.Line+", with", collectedResult.Occurrences,
+				"occurrences in", collectedResult.Files, "files")
+		}
 	}
 }
 
@@ -84,23 +99,40 @@ func scanOrganisationMembersRepoLogs(gh *github.Client, opts Opts) {
 	repos := retrieval.GetUsersRepos(gh, *opts.Organisation, members, *opts.ThreadsDownload)
 	logger.Print(*opts.Organisation, "", "scan-org-members-repo-logs", "Found", len(repos), "repos")
 
+	globalCollectedResults := make(map[string]explore.CollectedResult)
 	for idx, repo := range repos {
 		parts := strings.Split(repo, "/")
 		*opts.Owner = parts[0]
 		*opts.Repo = parts[1]
 		logger.Print(*opts.Owner, *opts.Repo, "scan-org-members-repo-logs", "Scanning", *opts.Owner+"/"+*opts.Repo,
 			fmt.Sprint("(", idx+1, "/", len(repos)), "members repos in org)")
-		scanRepoLogs(gh, opts)
+		collectedResults := scanRepoLogs(gh, opts)
+		appendGlobalCollectedResults(globalCollectedResults, collectedResults)
+	}
+
+	logger.Print(*opts.Organisation, "", "scan-org-members-repo-logs", "Finished scanning org members repo logs")
+	for matchedString, collectedResult := range globalCollectedResults {
+		if collectedResult.IsCondensed {
+			logger.Print(*opts.Organisation, "", "summary", matchedString, "at",
+				collectedResult.Filename+":"+collectedResult.Line+", with", collectedResult.Occurrences,
+				"similar occurrences (probably randomly generated)")
+		} else {
+			logger.Print(*opts.Organisation, "", "summary", matchedString, "at",
+				collectedResult.Filename+":"+collectedResult.Line+", with", collectedResult.Occurrences,
+				"occurrences in", collectedResult.Files, "files")
+		}
 	}
 }
 
-func scanRepoLogs(gh *github.Client, opts Opts) {
+func scanRepoLogs(gh *github.Client, opts Opts) map[string]explore.CollectedResult {
+	collectedResults := make(map[string]explore.CollectedResult)
 	if *opts.IsDownload {
 		downloadRepoLogs(gh, opts)
 	}
 	if *opts.IsSearch {
-		searchRepoLogs(opts)
+		collectedResults = searchRepoLogs(opts)
 	}
+	return collectedResults
 }
 
 func downloadRepoLogs(gh *github.Client, opts Opts) {
@@ -117,26 +149,54 @@ func downloadRepoLogs(gh *github.Client, opts Opts) {
 	logger.Print(*opts.Owner, *opts.Repo, "download-logs", "Found", downloads, "log files")
 }
 
-func searchRepoLogs(opts Opts) {
+func searchRepoLogs(opts Opts) map[string]explore.CollectedResult {
+	globalCollectedResults := make(map[string]explore.CollectedResult)
 	err := exec.Command("ls", *opts.Owner+"/"+*opts.Repo).Run()
 	if err != nil {
 		logger.Print(*opts.Owner, *opts.Repo, "search-logs", "No logs found, skipping search")
-		return
+		return globalCollectedResults
 	}
 
 	if len(*opts.WordlistVariables) > 0 {
 		logger.Print(*opts.Owner, *opts.Repo, "search-logs", "Searching logs for variable assignments")
-		matches := explore.SearchLogsForVariableAssignments(*opts.Owner, *opts.Repo, *opts.WordlistVariables, *opts.ThreadsSearch)
-		logger.Print(*opts.Owner, *opts.Repo, "search-logs", "Finished search,", matches, "variable assignments found")
+		collectedResults := explore.SearchLogsForVariableAssignments(*opts.Owner, *opts.Repo, *opts.WordlistVariables, *opts.ThreadsSearch)
+		logger.Print(*opts.Owner, *opts.Repo, "search-logs", "Finished search,", len(collectedResults), "variable assignments found")
+		for matchedString, collectedResult := range collectedResults {
+			globalCollectedResults[matchedString] = collectedResult
+		}
 	} else {
 		logger.Print(*opts.Owner, *opts.Repo, "search-logs", "No variable names wordlist provided")
 	}
 
 	if len(*opts.WordlistKeywords) > 0 {
 		logger.Print(*opts.Owner, *opts.Repo, "search-logs", "Searching logs for keywords")
-		matches := explore.SearchLogsForKeywords(*opts.Owner, *opts.Repo, *opts.WordlistKeywords, *opts.ThreadsSearch)
-		logger.Print(*opts.Owner, *opts.Repo, "search-logs", "Finished search", matches, "keywords found")
+		collectedResults := explore.SearchLogsForKeywords(*opts.Owner, *opts.Repo, *opts.WordlistKeywords, *opts.ThreadsSearch)
+		logger.Print(*opts.Owner, *opts.Repo, "search-logs", "Finished search", len(collectedResults), "keywords found")
+		for matchedString, collectedResult := range collectedResults {
+			globalCollectedResults[matchedString] = collectedResult
+		}
 	} else {
 		logger.Print(*opts.Owner, *opts.Repo, "search-logs", "No keywords wordlist provided")
+	}
+
+	return globalCollectedResults
+}
+
+func appendGlobalCollectedResults(globalCollectedResults, collectedResultsToAppend map[string]explore.CollectedResult) {
+	for matchedString, collectedResultToAppend := range collectedResultsToAppend {
+		if existingGlobalCollectedResult, exists := globalCollectedResults[matchedString]; exists {
+			if !existingGlobalCollectedResult.IsCondensed && !collectedResultToAppend.IsCondensed {
+				updatedGlobalCollectedResult := existingGlobalCollectedResult
+				updatedGlobalCollectedResult.Files += collectedResultToAppend.Files
+				updatedGlobalCollectedResult.Occurrences += collectedResultToAppend.Occurrences
+				globalCollectedResults[matchedString] = updatedGlobalCollectedResult
+			} else if existingGlobalCollectedResult.IsCondensed && !collectedResultToAppend.IsCondensed {
+				globalCollectedResults[matchedString] = collectedResultToAppend
+			} else if existingGlobalCollectedResult.IsCondensed && collectedResultToAppend.IsCondensed {
+				updatedGlobalCollectedResult := existingGlobalCollectedResult
+				updatedGlobalCollectedResult.Occurrences += collectedResultToAppend.Occurrences
+				globalCollectedResults[matchedString] = updatedGlobalCollectedResult
+			}
+		}
 	}
 }
