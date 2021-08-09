@@ -120,7 +120,7 @@ func downloadRepoLogs(gh *github.Client, opts Opts) {
 func searchRepoLogs(opts Opts) {
 	err := exec.Command("ls", *opts.Owner+"/"+*opts.Repo).Run()
 	if err != nil {
-		logger.Print(*opts.Owner, *opts.Repo, "search-logs", *opts.Owner+"/"+*opts.Repo, "does not exist, skipping search")
+		logger.Print(*opts.Owner, *opts.Repo, "search-logs", "No logs found, skipping search")
 		return
 	}
 

@@ -144,6 +144,12 @@ func collectSearchResults(owner, repo, stringToMatch string) map[string]collecte
 	// condense grep results into files: matchedString, filename => line (first occurrence), occurrences
 	condensedResultsByFile := make(map[condensedResultByFileKey]condensedResultByFileValue)
 	for _, grepResult := range grepResults {
+
+		// skip censored and blank variable assignments
+		if strings.Contains(stringToMatch, "[:=]") && isVariableAssignmentBlankOrCensored(grepResult.matchedString) {
+			continue
+		}
+
 		fileMatchKey := condensedResultByFileKey{
 			filename:      grepResult.filename,
 			matchedString: grepResult.matchedString,
@@ -251,4 +257,17 @@ func searchRepoDirectoryUsingGrep(owner, repo, stringToMatch string) []grepResul
 	}
 
 	return grepResults
+}
+
+func isVariableAssignmentBlankOrCensored(matchedString string) bool {
+	if strings.Index(matchedString, ":") == len(matchedString)-1 && !strings.Contains(matchedString, "=") {
+		return true
+	}
+	if strings.Index(matchedString, "=") == len(matchedString)-1 && !strings.Contains(matchedString, ":") {
+		return true
+	}
+	if len(matchedString) >= 3 && matchedString[len(matchedString)-3:] == "***" {
+		return true
+	}
+	return false
 }
