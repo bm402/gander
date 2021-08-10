@@ -25,14 +25,14 @@ func DownloadLogsFromRunIds(gh *github.Client, owner, repo string, runIds []int6
 	runIdConfigs := make(chan runIdConfig, len(runIds))
 	fivePercent := len(runIds) / 20
 	successfulDownloads := int64(0)
-	goneResponseCounter := int64(0)
+	errorResponseCounter := int64(0)
 
 	// create worker threads
 	for i := 0; i < threads; i++ {
 		go func(idConfigs <-chan runIdConfig, thread int) {
 			for idConfig := range idConfigs {
-				// if multiple gone responses, skip remaining runs because they are most likely also gone
-				if goneResponseCounter > GONE_RESPONSE_THRESHOLD {
+				// if multiple error responses, skip remaining runs because they are most likely also errors
+				if errorResponseCounter > ERROR_RESPONSE_THRESHOLD {
 					wg.Done()
 					continue
 				}
@@ -44,8 +44,8 @@ func DownloadLogsFromRunIds(gh *github.Client, owner, repo string, runIds []int6
 				err := getLogsFromRunId(gh, owner, repo, idConfig.id, thread)
 				if err == nil {
 					atomic.AddInt64(&successfulDownloads, 1)
-				} else if err.Error() == "unexpected status code: 410 Gone" {
-					atomic.AddInt64(&goneResponseCounter, 1)
+				} else {
+					atomic.AddInt64(&errorResponseCounter, 1)
 				}
 				wg.Done()
 			}
@@ -65,8 +65,8 @@ func DownloadLogsFromRunIds(gh *github.Client, owner, repo string, runIds []int6
 	close(runIdConfigs)
 	wg.Wait()
 
-	if goneResponseCounter > GONE_RESPONSE_THRESHOLD {
-		logger.Print(owner, repo, "download-logs", "Encountered multiple 410 Gone responses, skipping rest of repo")
+	if errorResponseCounter > ERROR_RESPONSE_THRESHOLD {
+		logger.Print(owner, repo, "download-logs", "Encountered lots of error responses, skipping rest of repo")
 	}
 
 	return int(successfulDownloads)
@@ -133,10 +133,10 @@ func getLogUrl(gh *github.Client, owner, repo string, runId int64, thread int) (
 			time.Sleep(time.Until(rateReset))
 			resp.Body.Close()
 			redirectUrl, resp, err = gh.Actions.GetWorkflowRunLogs(context.TODO(), owner, repo, runId, true)
-		} else if resp.StatusCode == 410 {
+		} else if len(string(respBodyBytes)) > 0 {
+			logger.Print(owner, repo, "download-logs", "Could not get redirect url:", err.Error(), string(respBodyBytes))
 			return "", err
 		} else {
-			logger.Print(owner, repo, "download-logs", "Could not get redirect url:", err.Error(), string(respBodyBytes))
 			return "", err
 		}
 	}
