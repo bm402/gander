@@ -9,3 +9,4 @@ gho_.*\ *
 ghu_.*\ *
 ghs_.*\ *
 ghr_.*\ *
+-----BEGIN.*PRIVATE KEY-----
