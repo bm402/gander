@@ -71,7 +71,7 @@ func SearchLogsForVariableAssignments(owner, repo, wordlistPath string, threads 
 	// add variable assignments to channel to trigger workers
 	for _, variableName := range variableNames {
 		wg.Add(1)
-		variableAssignments <- variableName + "\\ *[:=]\\ *\\([^\\ &]\\+\\)"
+		variableAssignments <- "[^\\ ?&]*" + variableName + "\\ *[:=]\\ *\\([^\\ &]\\+\\)"
 	}
 
 	// close channel and wait for threads to finish
