@@ -1,8 +1,12 @@
 is not in the npm registry
 No matching distribution
 Could not find a valid gem
+Could not find package
+vendor does not exist
+does not exist and could not be created
 ghp_.*\ *
 gho_.*\ *
 ghu_.*\ *
 ghs_.*\ *
 ghr_.*\ *
+\-\-\-\-\-BEGIN.*PRIVATE KEY\-\-\-\-\-
